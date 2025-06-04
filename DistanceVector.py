@@ -5,10 +5,8 @@ import copy
 def read_topology():
     """Read topology from standard input."""
     graph = defaultdict(dict)
-
-    #Initialise Nodes Vector
+    
     nodes = []
-
     # Read nodes until START
     while True:
         line = input().strip()
@@ -41,7 +39,17 @@ def read_topology():
 
 def apply_updates(graph, updates):
     """Apply topology updates."""
-
+    for src, dest, cost in updates:
+        # Remove link if weight is unapplicable
+        if cost == -1:
+            if dest in graph[src]:
+                del graph[src][dest]
+            if src in graph[dest]:
+                del graph[dest][src]
+        else:
+            graph[src][dest] = cost
+            graph[dest][src] = cost
+    
     return
 
 def initialise_tables(nodes):
@@ -61,7 +69,7 @@ def print_routing_tables(routing_tables, nodes):
 
 def distance_vector(graph, nodes):
     """Run the Distance Vector algorithm until convergence."""
-    
+
     return
 
 def main():
