@@ -94,7 +94,8 @@ def print_distance_tables(step, distance_tables, nodes):
         for neighbour in neighbors:
             costs = []
             for dest in destinations:
-                cost = distance_tables[node][neighbour][dest]
+                # Transpose the table: use distance_tables[node][dest][neighbour]
+                cost = distance_tables[node][dest][neighbour]
                 costs.append("INF" if cost == float('inf') else str(int(cost)))
             print(f"{neighbour}    {'    '.join(costs)}")
 
