@@ -59,7 +59,7 @@ def initialise_tables(nodes, graph):
     distance_tables = {
         node: {
             neighbour: {dest: float('inf') for dest in nodes if dest != node}
-            for neighbour in (list(graph[node].keys()) + [node])  # Include node itself
+            for neighbour in nodes  # Include all nodes as potential neighbours
         }
         for node in nodes
     }
@@ -86,16 +86,16 @@ def print_distance_tables(step, distance_tables, nodes):
         print(f"\nDistance Table of router {node} at t={step}:")
         # Destinations excluding the node itself
         destinations = sorted([dest for dest in nodes if dest != node])
-        # Neighbors excluding the node itself
-        neighbors = sorted([neighbour for neighbour in nodes if neighbour != node])
+        # Neighbours excluding the node itself
+        neighbours = sorted([neighbour for neighbour in nodes if neighbour != node])
         # Print header with destinations
         print(f"     {'    '.join(destinations)}")
         # Print rows for each neighbour
-        for neighbour in neighbors:
+        for neighbour in neighbours:
             costs = []
             for dest in destinations:
-                # Transpose the table: use distance_tables[node][dest][neighbour]
-                cost = distance_tables[node][dest][neighbour]
+                # Safely access cost, default to INF if key missing
+                cost = distance_tables[node].get(dest, {}).get(neighbour, float('inf'))
                 costs.append("INF" if cost == float('inf') else str(int(cost)))
             print(f"{neighbour}    {'    '.join(costs)}")
 
@@ -106,7 +106,7 @@ def print_routing_tables(routing_tables, distance_tables, nodes):
         for dest in sorted(nodes):
             if dest != node:
                 next_hop = routing_tables[node][dest]
-                # Find minimum cost to dest across all neighbors
+                # Find minimum cost to dest across all neighbours
                 min_cost = float('inf')
                 if next_hop:
                     min_cost = min(
@@ -123,7 +123,8 @@ def distance_vector(graph, nodes, start_step):
     step = start_step
     converged = False
 
-    # Print initial tables at step 0
+    # Print tables before running DV
+    print(f"TABLES PRINTING")
     print_distance_tables(step, distance_tables, nodes)
     step += 1
 
@@ -143,13 +144,17 @@ def distance_vector(graph, nodes, start_step):
                     min_cost = graph[node][dest]
                     next_hop = dest
 
-                # Update costs via each neighbour
-                for neighbour in graph[node]:
+                # Update costs for all nodes as potential neighbours
+                for neighbour in nodes:
                     if neighbour != node:
                         # Cost to dest via neighbour
-                        cost = graph[node][neighbour]
-                        if dest in distance_tables[neighbour][neighbour]:
-                            cost += distance_tables[neighbour][neighbour][dest]
+                        cost = float('inf')
+                        if neighbour in graph[node]:  # Only compute cost for actual neighbours
+                            cost = graph[node][neighbour]
+                            if dest in distance_tables[neighbour][neighbour]:
+                                cost += distance_tables[neighbour][neighbour][dest]
+                            if cost == float('inf'):
+                                cost = float('inf')  # Ensure INF if no path exists
                         new_distances[node][neighbour][dest] = cost
 
                         # Update minimum cost for routing table
