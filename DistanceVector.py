@@ -124,7 +124,6 @@ def distance_vector(graph, nodes, start_step):
     converged = False
 
     # Print tables before running DV
-    print(f"TABLES PRINTING")
     print_distance_tables(step, distance_tables, nodes)
     step += 1
 
@@ -205,7 +204,6 @@ def main():
 
     # Apply updates and run DV again
     if updates:
-        print(f"\nAPPLYING UPDATES")
         apply_updates(graph, updates)
         distance_vector(graph, nodes, step+1)
 

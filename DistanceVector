@@ -124,7 +124,6 @@ def distance_vector(graph, nodes, start_step):
     converged = False
 
     # Print tables before running DV
-    print(f"TABLES PRINTING")
     print_distance_tables(step, distance_tables, nodes)
     step += 1
 
@@ -144,17 +143,21 @@ def distance_vector(graph, nodes, start_step):
                     min_cost = graph[node][dest]
                     next_hop = dest
 
-                # Update costs for all nodes as potential neighbours
-                for neighbour in nodes:
+                # Update costs via actual neighbours
+                for neighbour in graph[node]:
                     if neighbour != node:
                         # Cost to dest via neighbour
-                        cost = float('inf')
-                        if neighbour in graph[node]:  # Only compute cost for actual neighbours
+                        if neighbour == dest:
+                            # Direct link cost
                             cost = graph[node][neighbour]
-                            if dest in distance_tables[neighbour][neighbour]:
-                                cost += distance_tables[neighbour][neighbour][dest]
-                            if cost == float('inf'):
-                                cost = float('inf')  # Ensure INF if no path exists
+                        else:
+                            # Multi-hop cost via neighbour
+                            cost = graph[node][neighbour]
+                            neighbour_cost = min(
+                                distance_tables[neighbour][n].get(dest, float('inf'))
+                                for n in distance_tables[neighbour]
+                            )
+                            cost += neighbour_cost if neighbour_cost != float('inf') else float('inf')
                         new_distances[node][neighbour][dest] = cost
 
                         # Update minimum cost for routing table
@@ -163,12 +166,14 @@ def distance_vector(graph, nodes, start_step):
                             next_hop = neighbour
 
                 # Update routing table if cost or next-hop changed
-                if min_cost != float('inf') and (
-                    min_cost != min([distance_tables[node][n][dest] for n in distance_tables[node] if dest in distance_tables[node][n]] or float('inf'))
-                    or next_hop != routing_tables[node][dest]
-                ):
-                    new_routing[node][dest] = next_hop
-                    converged = False
+                if min_cost != float('inf'):
+                    old_cost = min(
+                        distance_tables[node][n].get(dest, float('inf'))
+                        for n in distance_tables[node]
+                    ) if any(dest in distance_tables[node][n] for n in distance_tables[node]) else float('inf')
+                    if min_cost != old_cost or next_hop != routing_tables[node][dest]:
+                        new_routing[node][dest] = next_hop
+                        converged = False
 
         distance_tables = new_distances
         routing_tables = new_routing
@@ -199,10 +204,7 @@ def main():
 
     # Apply updates and run DV again
     if updates:
-        print(f"\nAPPLYING UPDATES")
         apply_updates(graph, updates)
-        # Reinitialise tables to reflect updated graph
-        distance_tables, routing_tables = initialise_tables(nodes, graph)
         distance_vector(graph, nodes, step+1)
 
 if __name__ == "__main__":
