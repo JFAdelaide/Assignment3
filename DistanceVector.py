@@ -38,7 +38,7 @@ def read_topology():
 
     return graph, nodes, updates
 
-def apply_updates(graph, updates):
+def apply_updates(graph, nodes, updates, distance_tables):
     """Apply topology updates."""
     for src, dest, cost in updates:
         # Remove link/edge from the topology if present
@@ -50,8 +50,78 @@ def apply_updates(graph, updates):
         else:
             graph[src][dest] = cost
             graph[dest][src] = cost
-    
+
     return
+
+def update_distance_tables(graph, nodes, updates, distance_tables):
+    """Update distance tables after topology changes without reinitialising."""
+    # Track removed link costs for invalidation
+    removed_links = {}
+    for src, dest, cost in updates:
+        if cost == -1 and dest in graph[src]:
+            removed_links[(src, dest)] = graph[src][dest]
+            removed_links[(dest, src)] = graph[dest][src]
+
+    # Apply updates to direct links in distance_tables
+    for src, dest, cost in updates:
+        if cost == -1:
+            # Remove link: set direct link costs to INF
+            if dest in graph[src]:
+                del graph[src][dest]
+            if src in graph[dest]:
+                del graph[dest][src]
+            # Update distance_tables for affected direct links
+            for node in [src, dest]:
+                for neighbour in nodes:
+                    if neighbour != node:
+                        if neighbour == dest and node == src or neighbour == src and node == dest:
+                            distance_tables[node][neighbour][neighbour] = float('inf')
+                            # Invalidate multi-hop paths that used this link
+                            for d in nodes:
+                                if d != node and d != neighbour:
+                                    # Check all paths through this neighbour
+                                    link_cost = removed_links.get((node, neighbour), float('inf'))
+                                    min_neighbour_cost = min(
+                                        distance_tables[neighbour][n].get(d, float('inf'))
+                                        for n in nodes if n != node
+                                    )
+                                    expected_cost = link_cost + min_neighbour_cost if min_neighbour_cost != float('inf') else float('inf')
+                                    if distance_tables[node][neighbour][d] == expected_cost:
+                                        distance_tables[node][neighbour][d] = float('inf')
+        else:
+            # Update link cost
+            graph[src][dest] = cost
+            graph[dest][src] = cost
+            # Update distance_tables for direct links
+            distance_tables[src][dest][dest] = cost
+            distance_tables[dest][src][src] = cost
+            # Update node's own table
+            distance_tables[src][src][dest] = cost
+            distance_tables[dest][dest][src] = cost
+
+    # Recompute all multi-hop paths for all neighbours
+    for node in nodes:
+        for neighbour in nodes:
+            if neighbour != node:
+                for dest in nodes:
+                    if dest != node and dest != neighbour:
+                        # Recompute path using updated graph
+                        if neighbour in graph[node]:
+                            cost = graph[node][neighbour]
+                            # Use direct link costs for neighbour to dest if available
+                            neighbour_cost = graph[neighbour].get(dest, float('inf'))
+                            if neighbour_cost == float('inf'):
+                                # Otherwise, use minimum cost from neighbour's table
+                                neighbour_cost = min(
+                                    distance_tables[neighbour][n].get(dest, float('inf'))
+                                    for n in nodes if n != node
+                                )
+                            cost += neighbour_cost if neighbour_cost != float('inf') else float('inf')
+                            distance_tables[node][neighbour][dest] = cost
+                        else:
+                            distance_tables[node][neighbour][dest] = float('inf')
+
+    return distance_tables
 
 def initialise_tables(nodes, graph):
     """Initialise distance and routing tables."""
@@ -66,7 +136,7 @@ def initialise_tables(nodes, graph):
     # Routing tables: {node: {dest: next_hop}}
     routing_tables = {node: {dest: None for dest in nodes if dest != node} for node in nodes}
 
-    # Initialise with direct links
+    # Initialise with direct links only
     for node in nodes:
         for neighbour in graph[node]:
             if neighbour != node:
@@ -117,11 +187,12 @@ def print_routing_tables(routing_tables, distance_tables, nodes):
                 if min_cost != float('inf') and next_hop is not None:
                     print(f"{dest},{next_hop},{int(min_cost)}")
 
-def distance_vector(graph, nodes, start_step):
-    """Run the Distance Vector algorithm until convergence."""
+def distance_vector(graph, nodes, updates):
+    """Run the Distance Vector algorithm and apply updates until convergence."""
     distance_tables, routing_tables = initialise_tables(nodes, graph)
-    step = start_step
+    step = 0
     converged = False
+    updates_applied = False
 
     # Print tables before running DV
     print_distance_tables(step, distance_tables, nodes)
@@ -155,7 +226,7 @@ def distance_vector(graph, nodes, start_step):
                             cost = graph[node][neighbour]
                             neighbour_cost = min(
                                 distance_tables[neighbour][n].get(dest, float('inf'))
-                                for n in distance_tables[neighbour]
+                                for n in nodes if n != neighbour
                             )
                             cost += neighbour_cost if neighbour_cost != float('inf') else float('inf')
                         new_distances[node][neighbour][dest] = cost
@@ -181,14 +252,62 @@ def distance_vector(graph, nodes, start_step):
         # Print tables for this step
         print_distance_tables(step, distance_tables, nodes)
 
-        # Break if converged
+        # Apply updates and update distance tables, then run one DV iteration
+        if converged and updates and not updates_applied:
+            print_routing_tables(routing_tables, distance_tables, nodes)
+            # Update distance tables instead of reinitializing
+            distance_tables = update_distance_tables(graph, nodes, updates, distance_tables)
+            updates_applied = True
+            converged = False
+            step += 1
+            print_distance_tables(step, distance_tables, nodes)
+            step += 1
+            # Run one DV iteration immediately to compute multi-hop paths
+            new_distances = copy.deepcopy(distance_tables)
+            new_routing = copy.deepcopy(routing_tables)
+            for node in nodes:
+                for dest in [d for d in nodes if d != node]:
+                    min_cost = float('inf')
+                    next_hop = None
+                    if dest in graph[node]:
+                        min_cost = graph[node][dest]
+                        next_hop = dest
+                    for neighbour in graph[node]:
+                        if neighbour != node:
+                            if neighbour == dest:
+                                cost = graph[node][neighbour]
+                            else:
+                                cost = graph[node][neighbour]
+                                neighbour_cost = min(
+                                    distance_tables[neighbour][n].get(dest, float('inf'))
+                                    for n in nodes if n != neighbour
+                                )
+                                cost += neighbour_cost if neighbour_cost != float('inf') else float('inf')
+                            new_distances[node][neighbour][dest] = cost
+                            if cost < min_cost:
+                                min_cost = cost
+                                next_hop = neighbour
+                    if min_cost != float('inf'):
+                        old_cost = min(
+                            distance_tables[node][n].get(dest, float('inf'))
+                            for n in distance_tables[node]
+                        ) if any(dest in distance_tables[node][n] for n in distance_tables[node]) else float('inf')
+                        if min_cost != old_cost or next_hop != routing_tables[node][dest]:
+                            new_routing[node][dest] = next_hop
+                            converged = False
+            distance_tables = new_distances
+            routing_tables = new_routing
+            print_distance_tables(step, distance_tables, nodes)
+            step += 1
+            continue
+
         if converged:
             break
 
         step += 1
 
     print_routing_tables(routing_tables, distance_tables, nodes)
-    return distance_tables, routing_tables, step
+    return
 
 def main():
     # Generate graph
@@ -200,12 +319,7 @@ def main():
         return
 
     # Process initial topology
-    distance_tables, routing_tables, step = distance_vector(graph, nodes, 0)
-
-    # Apply updates and run DV again
-    if updates:
-        apply_updates(graph, updates)
-        distance_vector(graph, nodes, step+1)
+    distance_vector(graph, nodes, updates)
 
 if __name__ == "__main__":
     main()
